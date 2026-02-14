@@ -13,13 +13,14 @@ import { css } from '@emotion/css';
 import { FormLayout } from '@formily/antd-v5';
 import { SchemaOptionsContext, useFieldSchema } from '@formily/react';
 import { uid } from '@formily/shared';
-import { Button, Tabs } from 'antd';
+import { transformMultiColumnToSingleColumn } from '@nocobase/utils/client';
+import { Badge, Button, Tabs } from 'antd';
 import classNames from 'classnames';
 import React, { FC, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useTranslation } from 'react-i18next';
 import { NavigateFunction, Outlet, useOutletContext } from 'react-router-dom';
-import { FormDialog, withSearchParams } from '..';
+import { FormDialog, ICON_POPUP_Z_INDEX, withSearchParams, zIndexContext } from '..';
 import { antTableCell } from '../../../acl/style';
 import {
   CurrentTabUidContext,
@@ -29,17 +30,22 @@ import {
   useNavigateNoUpdate,
   useRouterBasename,
 } from '../../../application/CustomRouterContextProvider';
+import { AppNotFound } from '../../../common/AppNotFound';
 import { useDocumentTitle } from '../../../document-title';
 import { useGlobalTheme } from '../../../global-theme';
+import { useEvaluatedExpression } from '../../../hooks/useParsedValue';
+import { NAMESPACE_UI_SCHEMA } from '../../../i18n/constant';
 import { Icon } from '../../../icon';
-import { AppNotFound } from '../../../nocobase-buildin-plugin';
 import {
   NocoBaseDesktopRouteType,
   NocoBaseRouteContext,
   useCurrentRoute,
+  useMobileLayout,
 } from '../../../route-switch/antd/admin-layout';
-import { KeepAliveProvider, useKeepAlive } from '../../../route-switch/antd/admin-layout/KeepAlive';
+import { NocoBaseDesktopRoute } from '../../../route-switch/antd/admin-layout/convertRoutesToSchema';
+import { KeepAlive, useKeepAlive } from '../../../route-switch/antd/admin-layout/KeepAlive';
 import { useGetAriaLabelOfSchemaInitializer } from '../../../schema-initializer/hooks/useGetAriaLabelOfSchemaInitializer';
+import { VariableScope } from '../../../variables/VariableScope';
 import { DndContext } from '../../common';
 import { SortableItem } from '../../common/sortable-item';
 import { RemoteSchemaComponent, SchemaComponent, SchemaComponentOptions } from '../../core';
@@ -47,6 +53,7 @@ import { useCompile, useDesignable } from '../../hooks';
 import { useToken } from '../__builtins__';
 import { ErrorFallback } from '../error-fallback';
 import { useMenuDragEnd, useNocoBaseRoutes } from '../menu/Menu';
+import { AllDataBlocksProvider } from './AllDataBlocksProvider';
 import { useStyles } from './Page.style';
 import { PageDesigner, PageTabDesigner } from './PageTabDesigner';
 import { PopupRouteContextResetter } from './PopupRouteContextResetter';
@@ -107,13 +114,6 @@ const InternalPage = React.memo((props: PageProps) => {
   );
 });
 
-const hiddenStyle: React.CSSProperties = {
-  // Visually hide the element while keeping it in document flow to prevent reflow/repaint
-  transform: 'scale(0)',
-  // Prevent element from receiving any pointer events (clicks, hovers etc) to avoid interfering with other elements
-  pointerEvents: 'none',
-};
-
 export const Page = React.memo((props: PageProps) => {
   const { hashId, componentCls } = useStyles();
   const { active: pageActive } = useKeepAlive();
@@ -125,12 +125,14 @@ export const Page = React.memo((props: PageProps) => {
   }
 
   return (
-    <div className={`${componentCls} ${hashId} ${antTableCell}`} style={pageActive ? null : hiddenStyle}>
-      {/* Avoid passing values down to improve rendering performance */}
-      <CurrentTabUidContext.Provider value={''}>
-        <InternalPage currentTabUid={tabUidRef.current} className={props.className} />
-      </CurrentTabUidContext.Provider>
-    </div>
+    <AllDataBlocksProvider>
+      <div className={`${componentCls} ${hashId} ${antTableCell}`}>
+        {/* Avoid passing values down to improve rendering performance */}
+        <CurrentTabUidContext.Provider value={''}>
+          <InternalPage currentTabUid={tabUidRef.current} className={props.className} />
+        </CurrentTabUidContext.Provider>
+      </div>
+    </AllDataBlocksProvider>
   );
 });
 
@@ -162,36 +164,6 @@ const className1 = css`
   }
 `;
 
-const displayBlock = {
-  display: 'block',
-};
-
-const displayNone = {
-  display: 'none',
-};
-
-// Add a TabPane component to manage caching, implementing an effect similar to Vue's keep-alive
-const TabPane = React.memo(({ active: tabActive, uid }: { active: boolean; uid: string }) => {
-  const mountedRef = useRef(false);
-  const { active: pageActive } = useKeepAlive();
-
-  if (tabActive && !mountedRef.current) {
-    mountedRef.current = true;
-  }
-
-  if (!mountedRef.current) {
-    return null;
-  }
-
-  return (
-    <div style={tabActive ? displayBlock : displayNone}>
-      <KeepAliveProvider active={pageActive && tabActive}>
-        <RemoteSchemaComponent uid={uid} />
-      </KeepAliveProvider>
-    </div>
-  );
-});
-
 interface PageContentProps {
   loading: boolean;
   disablePageHeader: any;
@@ -204,6 +176,7 @@ const InternalPageContent = (props: PageContentProps) => {
   const currentRoute = useCurrentRoute();
   const navigate = useNavigateNoUpdate();
   const location = useLocationNoUpdate();
+  const { isMobileLayout } = useMobileLayout();
 
   const children = currentRoute?.children || [];
   const noTabs = children.every((tabRoute) => tabRoute.schemaUid !== activeKey && tabRoute.tabSchemaName !== activeKey);
@@ -223,28 +196,35 @@ const InternalPageContent = (props: PageContentProps) => {
     // Create a clean search string or empty string if only '?' remains
     const searchString = searchParams.toString() ? `?${searchParams.toString()}` : '';
 
-    navigate(location.pathname.replace(activeKey, oldTab.schemaUid) + searchString);
+    const newPath =
+      location.pathname + (location.pathname.endsWith('/') ? `tabs/${oldTab.schemaUid}` : `/tabs/${oldTab.schemaUid}`);
+    navigate(newPath + searchString);
+
     return null;
   }
 
   if (!disablePageHeader && enablePageTabs) {
     return (
-      <>
-        {currentRoute.children?.map((tabRoute) => {
-          return (
-            <NocoBaseRouteContext.Provider value={tabRoute} key={tabRoute.schemaUid}>
-              <TabPane active={tabRoute.schemaUid === activeKey} uid={tabRoute.schemaUid} />
-            </NocoBaseRouteContext.Provider>
-          );
-        })}
-      </>
+      <KeepAlive uid={activeKey}>
+        {(uid) => (
+          <NocoBaseRouteContext.Provider value={currentRoute.children?.find((item) => item.schemaUid === uid)}>
+            <RemoteSchemaComponent
+              uid={uid}
+              schemaTransform={isMobileLayout ? transformMultiColumnToSingleColumn : undefined}
+            />
+          </NocoBaseRouteContext.Provider>
+        )}
+      </KeepAlive>
     );
   }
 
   return (
     <div className={className1}>
       <NocoBaseRouteContext.Provider value={currentRoute?.children?.[0]}>
-        <RemoteSchemaComponent uid={currentRoute?.children?.[0].schemaUid} />
+        <RemoteSchemaComponent
+          uid={currentRoute?.children?.[0].schemaUid}
+          schemaTransform={isMobileLayout ? transformMultiColumnToSingleColumn : undefined}
+        />
       </NocoBaseRouteContext.Provider>
     </div>
   );
@@ -257,6 +237,23 @@ const PageContent = memo((props: PageContentProps) => {
     </PopupRouteContextResetter>
   );
 });
+
+const TabBadge: FC<{ tabRoute: NocoBaseDesktopRoute; style?: React.CSSProperties }> = (props) => {
+  const badgeCount = useEvaluatedExpression(props.tabRoute.options?.badge?.count);
+
+  if (badgeCount == null) return null;
+
+  return (
+    <Badge
+      {...props.tabRoute.options?.badge}
+      count={badgeCount}
+      style={{ maxWidth: '10em', ...props.style }}
+      dot={false}
+    >
+      {props.children}
+    </Badge>
+  );
+};
 
 const NocoBasePageHeaderTabs: FC<{ className: string; activeKey: string }> = ({ className, activeKey }) => {
   const fieldSchema = useFieldSchema();
@@ -294,23 +291,26 @@ const NocoBasePageHeaderTabs: FC<{ className: string; activeKey: string }> = ({ 
                 return (
                   <SchemaComponentOptions scope={options.scope} components={{ ...options.components }}>
                     <FormLayout layout={'vertical'}>
-                      <SchemaComponent
-                        schema={{
-                          properties: {
-                            title: {
-                              title: t('Tab name'),
-                              'x-component': 'Input',
-                              'x-decorator': 'FormItem',
-                              required: true,
+                      {/* 防止按钮的配置弹窗的图标弹窗被遮挡 */}
+                      <zIndexContext.Provider value={ICON_POPUP_Z_INDEX}>
+                        <SchemaComponent
+                          schema={{
+                            properties: {
+                              title: {
+                                title: t('Tab name'),
+                                'x-component': 'Input',
+                                'x-decorator': 'FormItem',
+                                required: true,
+                              },
+                              icon: {
+                                title: t('Icon'),
+                                'x-component': 'IconPicker',
+                                'x-decorator': 'FormItem',
+                              },
                             },
-                            icon: {
-                              title: t('Icon'),
-                              'x-component': 'IconPicker',
-                              'x-decorator': 'FormItem',
-                            },
-                          },
-                        }}
-                      />
+                          }}
+                        />
+                      </zIndexContext.Provider>
                     </FormLayout>
                   </SchemaComponentOptions>
                 );
@@ -367,15 +367,19 @@ const NocoBasePageHeaderTabs: FC<{ className: string; activeKey: string }> = ({ 
         return {
           label: (
             <NocoBaseRouteContext.Provider value={tabRoute}>
-              <SortableItem
-                id={String(tabRoute.id)}
-                className={classNames('nb-action-link', 'designerCss', className)}
-                schema={fakeSchema}
-              >
-                {tabRoute.icon && <Icon style={{ marginRight: 8 }} type={tabRoute.icon} />}
-                <span>{(tabRoute.title && routeT(compile(tabRoute.title))) || t('Unnamed')}</span>
-                <PageTabDesigner />
-              </SortableItem>
+              <VariableScope scopeId={tabRoute.schemaUid} type="pageTab">
+                <SortableItem
+                  id={String(tabRoute.id)}
+                  className={classNames('nb-action-link', 'designerCss', className)}
+                  schema={fakeSchema}
+                  style={{ display: 'flex', alignItems: 'center' }}
+                >
+                  {tabRoute.icon && <Icon style={{ marginRight: 8 }} type={tabRoute.icon} />}
+                  <span>{(tabRoute.title && routeT(compile(tabRoute.title))) || t('Unnamed')}</span>
+                  <PageTabDesigner />
+                  <TabBadge style={{ marginLeft: 4, color: tabRoute.options?.badge?.textColor }} tabRoute={tabRoute} />
+                </SortableItem>
+              </VariableScope>
             </NocoBaseRouteContext.Provider>
           ),
           key: tabRoute.schemaUid,
@@ -412,6 +416,7 @@ const NocoBasePageHeader = React.memo(({ activeKey, className }: { activeKey: st
   const { t } = useTranslation();
   const { t: routeT } = useRouteTranslation();
   const [pageTitle, setPageTitle] = useState(() => t(fieldSchema.title));
+  const { active } = useKeepAlive();
 
   const disablePageHeader = fieldSchema['x-component-props']?.disablePageHeader;
   const currentRoute = useCurrentRoute();
@@ -421,12 +426,13 @@ const NocoBasePageHeader = React.memo(({ activeKey, className }: { activeKey: st
   const { token } = useToken();
 
   useEffect(() => {
-    const title = t(fieldSchema.title) || t(currentRoute?.title);
-    if (title) {
+    const title =
+      t(fieldSchema.title, { ns: NAMESPACE_UI_SCHEMA }) || t(currentRoute?.title, { ns: NAMESPACE_UI_SCHEMA });
+    if (title && active) {
       setDocumentTitle(title);
       setPageTitle(title);
     }
-  }, [fieldSchema.title, pageTitle, setDocumentTitle, t, currentRoute?.title]);
+  }, [fieldSchema.title, pageTitle, setDocumentTitle, t, currentRoute?.title, active]);
 
   return (
     <>

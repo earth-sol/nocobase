@@ -7,11 +7,11 @@
  * For more information, please refer to: https://www.nocobase.com/agreement.
  */
 
-import { CloseOutlined, DeleteOutlined } from '@ant-design/icons';
+import { CaretRightOutlined, CloseOutlined, DeleteOutlined } from '@ant-design/icons';
 import { createForm, Field } from '@formily/core';
 import { toJS } from '@formily/reactive';
 import { ISchema, observer, useField, useForm } from '@formily/react';
-import { Alert, App, Button, Dropdown, Empty, Input, Space, Tag, Tooltip, message } from 'antd';
+import { Alert, App, Button, Collapse, Dropdown, Empty, Input, Space, Tag, Tooltip, message } from 'antd';
 import { cloneDeep, get, set } from 'lodash';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +26,6 @@ import {
   cx,
   useAPIClient,
   useActionContext,
-  useCancelAction,
   useCompile,
   usePlugin,
   useResourceActionContext,
@@ -39,10 +38,11 @@ import { useFlowContext } from '../FlowContext';
 import { DrawerDescription } from '../components/DrawerDescription';
 import { StatusButton } from '../components/StatusButton';
 import { JobStatusOptionsMap } from '../constants';
-import { useGetAriaLabelOfAddButton } from '../hooks/useGetAriaLabelOfAddButton';
+import { useGetAriaLabelOfAddButton, useWorkflowExecuted } from '../hooks';
 import { lang } from '../locale';
 import useStyles from '../style';
 import { UseVariableOptions, VariableOption, WorkflowVariableInput } from '../variable';
+import { useRemoveNodeContext } from '../RemoveNodeContext';
 
 export type NodeAvailableContext = {
   engine: WorkflowPlugin;
@@ -105,10 +105,10 @@ function useUpdateAction() {
   const ctx = useActionContext();
   const { refresh } = useResourceActionContext();
   const data = useNodeContext();
-  const { workflow } = useFlowContext();
+  const executed = useWorkflowExecuted();
   return {
     async run() {
-      if (workflow.executed) {
+      if (executed) {
         message.error(lang('Node in executed workflow cannot be modified'));
         return;
       }
@@ -197,57 +197,58 @@ export function RemoveButton() {
   const { workflow, nodes, refresh } = useFlowContext() ?? {};
   const current = useNodeContext();
   const { modal } = App.useApp();
-
-  const resource = api.resource('flow_nodes');
+  const executed = useWorkflowExecuted();
+  const removeNodeContext = useRemoveNodeContext();
 
   const onOk = useCallback(async () => {
-    await resource.destroy?.({
+    await api.resource('flow_nodes').destroy?.({
       filterByTk: current.id,
     });
     refresh();
-  }, [current.id, refresh, resource]);
+  }, [current.id, refresh, api]);
 
   const onRemove = useCallback(async () => {
-    const usingNodes = nodes.filter((node) => {
-      if (node === current) {
-        return false;
+    const branches = nodes.filter((item) => item.upstream === current && item.branchIndex != null);
+    if (!branches.length) {
+      const usingNodes = nodes.filter((node) => {
+        if (node === current) {
+          return false;
+        }
+
+        const template = parse(node.config);
+        const refs = template.parameters.filter(
+          ({ key }) =>
+            key.startsWith(`$jobsMapByNodeKey.${current.key}.`) || key === `$jobsMapByNodeKey.${current.key}`,
+        );
+        return refs.length;
+      });
+
+      if (usingNodes.length) {
+        modal.error({
+          title: lang('Can not delete'),
+          content: lang(
+            'The result of this node has been referenced by other nodes ({{nodes}}), please remove the usage before deleting.',
+            { nodes: usingNodes.map((item) => item.title).join(', ') },
+          ),
+        });
+        return;
       }
 
-      const template = parse(node.config);
-      const refs = template.parameters.filter(
-        ({ key }) => key.startsWith(`$jobsMapByNodeKey.${current.key}.`) || key === `$jobsMapByNodeKey.${current.key}`,
-      );
-      return refs.length;
-    });
-
-    if (usingNodes.length) {
-      modal.error({
-        title: lang('Can not delete'),
-        content: lang(
-          'The result of this node has been referenced by other nodes ({{nodes}}), please remove the usage before deleting.',
-          { nodes: usingNodes.map((item) => `#${item.id}`).join(', ') },
-        ),
+      modal.confirm({
+        title: t('Delete'),
+        content: t('Are you sure you want to delete it?'),
+        onOk,
       });
-      return;
+    } else {
+      removeNodeContext?.setDeletingNode(current);
     }
+  }, [current, modal, nodes, onOk, removeNodeContext, t]);
 
-    const hasBranches = !nodes.find((item) => item.upstream === current && item.branchIndex != null);
-    const message = hasBranches
-      ? t('Are you sure you want to delete it?')
-      : lang('This node contains branches, deleting will also be preformed to them, are you sure?');
-
-    modal.confirm({
-      title: t('Delete'),
-      content: message,
-      onOk,
-    });
-  }, [current, modal, nodes, onOk, t]);
-
-  if (!workflow) {
+  if (!workflow || executed) {
     return null;
   }
 
-  return workflow.executed ? null : (
+  return (
     <Button
       type="text"
       shape="circle"
@@ -264,22 +265,36 @@ export function JobButton() {
   const { jobs } = useNodeContext() ?? {};
   const { styles } = useStyles();
 
+  const onOpenJobInList = useCallback(
+    ({ key }) => {
+      if (!jobs?.length) {
+        return;
+      }
+      const job = jobs.find((item) => item.id == key);
+      setViewJob(job);
+    },
+    [jobs, setViewJob],
+  );
+
+  const onOpenOnlyJob = useCallback(() => {
+    const job = jobs?.[0];
+    if (!job) {
+      return;
+    }
+    setViewJob(job);
+  }, [jobs, setViewJob]);
+
   if (!execution) {
     return null;
   }
 
-  if (!jobs.length) {
+  if (!jobs?.length) {
     return <StatusButton className={styles.nodeJobButtonClass} disabled />;
-  }
-
-  function onOpenJob({ key }) {
-    const job = jobs.find((item) => item.id == key);
-    setViewJob(job);
   }
 
   return (
     <Tooltip title={lang('View result')}>
-      {jobs.length > 1 ? (
+      {jobs?.length > 1 ? (
         <Dropdown
           menu={{
             items: jobs.map((job) => {
@@ -293,7 +308,7 @@ export function JobButton() {
                 ),
               };
             }),
-            onClick: onOpenJob,
+            onClick: onOpenJobInList,
             className: styles.dropdownClass,
           }}
         >
@@ -306,8 +321,8 @@ export function JobButton() {
       ) : (
         <StatusButton
           statusMap={JobStatusOptionsMap}
-          status={jobs[0].status}
-          onClick={() => setViewJob(jobs[0])}
+          status={jobs?.[0].status}
+          onClick={onOpenOnlyJob}
           className={styles.nodeJobButtonClass}
         />
       )}
@@ -329,6 +344,7 @@ const useRunAction = () => {
     async run() {
       const template = parse(node.config);
       const config = template(toJS(values.config));
+      const logField = query('log').take() as Field;
       const resultField = query('result').take() as Field;
       resultField.setValue(null);
       resultField.setFeedback({});
@@ -351,6 +367,7 @@ const useRunAction = () => {
           messages: data.status > 0 ? [lang('Resolved')] : [lang('Failed')],
         });
         resultField.setValue(data.result);
+        logField.setValue(data.log || '');
       } catch (err) {
         resultField.setFeedback({
           type: 'error',
@@ -358,7 +375,6 @@ const useRunAction = () => {
         });
       }
       field.data.loading = false;
-      ctx.setFormValueChanged(false);
     },
   };
 };
@@ -369,7 +385,11 @@ function VariableReplacer({ name, value, onChange }) {
   return (
     <Space>
       <WorkflowVariableInput variableOptions={{}} value={`{{${name}}}`} disabled />
-      <Variable.Input useTypedConstant={['string', 'number', 'boolean', 'date']} value={value} onChange={onChange} />
+      <Variable.Input
+        useTypedConstant={['string', 'number', 'boolean', 'date', 'object']}
+        value={value}
+        onChange={onChange}
+      />
     </Space>
   );
 }
@@ -396,113 +416,163 @@ function TestFormFieldset({ value, onChange }) {
   );
 }
 
+function LogCollapse({ value }) {
+  return value ? (
+    <Collapse
+      ghost
+      items={[
+        {
+          key: 'log',
+          label: lang('Log'),
+          children: (
+            <Input.TextArea
+              value={value}
+              autoSize={{ minRows: 5, maxRows: 20 }}
+              style={{ whiteSpace: 'pre', cursor: 'text', fontFamily: 'monospace', fontSize: '80%' }}
+              disabled
+            />
+          ),
+        },
+      ]}
+      className={css`
+        .ant-collapse-item > .ant-collapse-header {
+          padding: 0;
+        }
+        .ant-collapse-content > .ant-collapse-content-box {
+          padding: 0;
+        }
+      `}
+    />
+  ) : null;
+}
+
+function useCancelAction() {
+  const form = useForm();
+  const ctx = useActionContext();
+  return {
+    async run() {
+      const resultField = form.query('result').take() as Field;
+      resultField.setFeedback();
+      form.setValues({ result: null, log: null });
+      form.clearFormGraph('*');
+      form.reset();
+      ctx.setVisible(false);
+    },
+  };
+}
+
 function TestButton() {
   const node = useNodeContext();
   const { values } = useForm();
+  const [visible, setVisible] = useState(false);
   const template = parse(values);
   const keys = template.parameters.map((item) => item.key);
   const form = useMemo(() => createForm(), []);
 
+  const onOpen = useCallback(() => {
+    setVisible(true);
+  }, []);
+  const setModalVisible = useCallback(
+    (v: boolean) => {
+      if (v) {
+        setVisible(true);
+        return;
+      }
+      const resultField = form.query('result').take() as Field;
+      resultField?.setFeedback();
+      form.setValues({ result: null, log: null });
+      form.clearFormGraph('*');
+      form.reset();
+      setVisible(false);
+    },
+    [form],
+  );
+
   return (
     <NodeContext.Provider value={{ ...node, config: values }}>
       <VariableKeysContext.Provider value={keys}>
-        <SchemaComponent
-          components={{
-            Alert,
-            TestFormFieldset,
-          }}
-          scope={{
-            useCancelAction,
-            useRunAction,
-          }}
-          schema={{
-            type: 'void',
-            name: 'testButton',
-            title: '{{t("Test run")}}',
-            'x-component': 'Action',
-            'x-component-props': {
-              icon: 'CaretRightOutlined',
-              // openSize: 'small',
-            },
-            properties: {
-              modal: {
-                type: 'void',
-                'x-decorator': 'FormV2',
-                'x-decorator-props': {
-                  form,
+        <ActionContextProvider value={{ visible, setVisible: setModalVisible }}>
+          <Button icon={<CaretRightOutlined />} onClick={onOpen}>
+            {lang('Test run')}
+          </Button>
+          <SchemaComponent
+            components={{
+              Alert,
+              TestFormFieldset,
+              LogCollapse,
+            }}
+            scope={{
+              useCancelAction,
+              useRunAction,
+            }}
+            schema={{
+              type: 'void',
+              name: 'modal',
+              'x-decorator': 'FormV2',
+              'x-decorator-props': {
+                form,
+              },
+              'x-component': 'Action.Modal',
+              title: `{{t("Test run", { ns: "workflow" })}}`,
+              properties: {
+                alert: {
+                  type: 'void',
+                  'x-component': 'Alert',
+                  'x-component-props': {
+                    message: `{{t("Test run will do the actual data manipulating or API calling, please use with caution.", { ns: "workflow" })}}`,
+                    type: 'warning',
+                    showIcon: true,
+                    className: css`
+                      margin-bottom: 1em;
+                    `,
+                  },
                 },
-                'x-component': 'Action.Modal',
-                title: `{{t("Test run", { ns: "workflow" })}}`,
-                properties: {
-                  alert: {
-                    type: 'void',
-                    'x-component': 'Alert',
-                    'x-component-props': {
-                      message: `{{t("Test run will do the actual data manipulating or API calling, please use with caution.", { ns: "workflow" })}}`,
-                      type: 'warning',
-                      showIcon: true,
-                      className: css`
-                        margin-bottom: 1em;
-                      `,
-                    },
-                  },
-                  config: {
-                    type: 'object',
-                    title: '{{t("Replace variables", { ns: "workflow" })}}',
-                    'x-decorator': 'FormItem',
-                    'x-component': 'TestFormFieldset',
-                  },
-                  actions: {
-                    type: 'void',
-                    'x-component': 'ActionBar',
-                    properties: {
-                      submit: {
-                        type: 'void',
-                        title: '{{t("Run")}}',
-                        'x-component': 'Action',
-                        'x-component-props': {
-                          type: 'primary',
-                          useAction: '{{ useRunAction }}',
-                        },
+                config: {
+                  type: 'object',
+                  title: '{{t("Replace variables", { ns: "workflow" })}}',
+                  'x-decorator': 'FormItem',
+                  'x-component': 'TestFormFieldset',
+                },
+                actions: {
+                  type: 'void',
+                  'x-component': 'ActionBar',
+                  properties: {
+                    submit: {
+                      type: 'void',
+                      title: '{{t("Run")}}',
+                      'x-component': 'Action',
+                      'x-component-props': {
+                        type: 'primary',
+                        useAction: '{{ useRunAction }}',
                       },
                     },
                   },
-                  result: {
-                    type: 'string',
-                    title: `{{t("Result", { ns: "workflow" })}}`,
-                    'x-decorator': 'FormItem',
-                    'x-component': 'Input.JSON',
-                    'x-component-props': {
-                      autoSize: {
-                        minRows: 5,
-                        maxRows: 20,
-                      },
-                      style: {
-                        whiteSpace: 'pre',
-                        cursor: 'text',
-                      },
+                },
+                result: {
+                  type: 'string',
+                  title: `{{t("Result", { ns: "workflow" })}}`,
+                  'x-decorator': 'FormItem',
+                  'x-component': 'Input.JSON',
+                  'x-component-props': {
+                    autoSize: {
+                      minRows: 5,
+                      maxRows: 20,
                     },
-                    'x-pattern': 'disabled',
-                  },
-                  footer: {
-                    type: 'void',
-                    'x-component': 'Action.Modal.Footer',
-                    properties: {
-                      cancel: {
-                        type: 'void',
-                        title: '{{t("Close")}}',
-                        'x-component': 'Action',
-                        'x-component-props': {
-                          useAction: '{{ useCancelAction }}',
-                        },
-                      },
+                    style: {
+                      whiteSpace: 'pre',
+                      cursor: 'text',
                     },
                   },
+                  'x-pattern': 'disabled',
+                },
+                log: {
+                  type: 'string',
+                  'x-component': 'LogCollapse',
                 },
               },
-            },
-          }}
-        />
+            }}
+          />
+        </ActionContextProvider>
       </VariableKeysContext.Provider>
     </NodeContext.Provider>
   );
@@ -515,8 +585,8 @@ export function NodeDefaultView(props) {
   const { workflow, refresh } = useFlowContext() ?? {};
   const { styles } = useStyles();
   const workflowPlugin = usePlugin(WorkflowPlugin);
+  const executed = useWorkflowExecuted();
   const instruction = workflowPlugin.instructions.get(data.type);
-  const detailText = workflow.executed ? '{{t("View")}}' : '{{t("Configure")}}';
 
   const [editingTitle, setEditingTitle] = useState<string>(data.title);
   const [editingConfig, setEditingConfig] = useState(false);
@@ -526,7 +596,7 @@ export function NodeDefaultView(props) {
     const values = cloneDeep(data.config);
     return createForm({
       initialValues: values,
-      disabled: workflow.executed,
+      disabled: Boolean(executed),
     });
   }, [data, workflow]);
 
@@ -620,7 +690,7 @@ export function NodeDefaultView(props) {
           </div>
         </div>
         <Input.TextArea
-          disabled={workflow.executed}
+          disabled={Boolean(executed)}
           value={editingTitle}
           onChange={(ev) => setEditingTitle(ev.target.value)}
           onBlur={(ev) => onChangeTitle(ev.target.value)}
@@ -723,7 +793,7 @@ export function NodeDefaultView(props) {
                         },
                         properties: instruction.fieldset,
                       },
-                      footer: workflow.executed
+                      footer: executed
                         ? null
                         : {
                             type: 'void',

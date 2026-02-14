@@ -15,7 +15,7 @@ describe('data source', async () => {
 
   beforeEach(async () => {
     app = await createMockServer({
-      plugins: ['nocobase', 'data-source-manager'],
+      plugins: ['data-source-main', 'data-source-manager', 'field-sort', 'error-handler'],
     });
   });
 
@@ -692,6 +692,47 @@ describe('data source', async () => {
       const dataSource2 = app.dataSourceManager.dataSources.get('mockInstance1');
       const collection2 = dataSource2.collectionManager.getCollection('comments');
       expect(collection2.getField('post')).toBeFalsy();
+    });
+
+    it(`should not return possibleTypes field when creating field`, async () => {
+      const createResp = await app
+        .agent()
+        .resource('dataSourcesCollections.fields', 'mockInstance1.comments')
+        .create({
+          values: {
+            type: 'string',
+            name: 'title',
+            possibleTypes: ['123', '456'],
+          },
+        });
+
+      expect(createResp.status).toBe(200);
+      const data = createResp.body.data;
+      expect(data.possibleTypes).not.exist;
+
+      const fieldModel = await app.db.getRepository('dataSourcesFields').findOne({
+        filter: {
+          dataSourceKey: 'mockInstance1',
+        },
+      });
+      expect(fieldModel.get('options').possibleTypes).not.exist;
+    });
+
+    it(`should not return possibleTypes field when update field`, async () => {
+      const fieldUpdateResp = await app
+        .agent()
+        .resource('dataSourcesCollections.fields', 'mockInstance1.posts')
+        .update({
+          filterByTk: 'title',
+          values: {
+            title: '标题 Field',
+            possibleTypes: ['123', '456'],
+          },
+        });
+
+      expect(fieldUpdateResp.status).toBe(200);
+      const data = fieldUpdateResp.body.data;
+      expect(data.possibleTypes).not.exist;
     });
   });
 });

@@ -7,21 +7,25 @@
  * For more information, please refer to: https://www.nocobase.com/agreement.
  */
 
-import React, { useState, useCallback } from 'react';
-import { DatePicker, Picker } from 'antd-mobile';
-import { Space, Select } from 'antd';
-import {
-  mapDatePicker,
-  DatePicker as NBDatePicker,
-  useDatePickerContext,
-  useCompile,
-  inferPickerType,
-  TimePicker as NBTimePicker,
-  mapTimeFormat,
-} from '@nocobase/client';
-import dayjs from 'dayjs';
 import { connect, mapProps, mapReadPretty, useField, useFieldSchema } from '@formily/react';
+import { autorun } from '@formily/reactive';
+import {
+  inferPickerType,
+  isVariable,
+  mapDatePicker,
+  mapTimeFormat,
+  DatePicker as NBDatePicker,
+  TimePicker as NBTimePicker,
+  useCompile,
+  useDatePickerContext,
+  useLocalVariables,
+  useVariables,
+} from '@nocobase/client';
 import { getPickerFormat } from '@nocobase/utils/client';
+import { Select, Space } from 'antd';
+import { DatePicker, Picker } from 'antd-mobile';
+import dayjs from 'dayjs';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 function getPrecision(timeFormat: string): 'hour' | 'minute' | 'second' {
@@ -49,16 +53,65 @@ const MobileDateTimePicker = connect(
       showTime = false,
       picker,
       disabled,
+      dateOnly,
+      utc,
       ...rest
     } = props;
     const [visible, setVisible] = useState(false);
+    const { parseVariable } = useVariables() || {};
+    const localVariables = useLocalVariables();
+    const [minDate, setMinDate] = useState(null);
+    const [maxDate, setMaxDate] = useState(null);
+    const disposeRef = useRef(null);
 
-    // 性能优化：使用 useCallback 缓存函数
+    useEffect(() => {
+      if (disposeRef.current) {
+        disposeRef.current();
+      }
+      disposeRef.current = autorun(() => {
+        limitDate();
+      });
+      return () => {
+        disposeRef.current();
+      };
+    }, [props._maxDate, props._minDate, localVariables, parseVariable]);
+
+    const limitDate = async () => {
+      // dayjs() 如果传入 undefined 可能会被解析成当前时间
+      let minDateTimePromise = props._minDate ? Promise.resolve(dayjs(props._minDate)) : Promise.resolve(null);
+      let maxDateTimePromise = props._maxDate ? Promise.resolve(dayjs(props._maxDate)) : Promise.resolve(null);
+
+      if (isVariable(props._maxDate)) {
+        maxDateTimePromise = parseVariable(props._maxDate, localVariables).then((result) =>
+          dayjs(result.value?.[0] || result.value),
+        );
+      }
+      if (isVariable(props._minDate)) {
+        minDateTimePromise = parseVariable(props._minDate, localVariables).then((result) => {
+          return dayjs(result.value?.[0] || result.value);
+        });
+      }
+
+      const [minDateTime, maxDateTime] = await Promise.all([minDateTimePromise, maxDateTimePromise]);
+      setMinDate(minDateTime ? minDateTime.toDate() : null);
+      setMaxDate(maxDateTime ? maxDateTime.toDate() : null);
+    };
+
     const handleConfirm = useCallback(
       (value) => {
         setVisible(false);
-        const selectedDateTime = new Date(value);
-        onChange(selectedDateTime);
+        if (dateOnly) {
+          onChange(dayjs(value).format('YYYY-MM-DD'));
+        } else if (!utc) {
+          if (showTime) {
+            onChange(dayjs(value).format('YYYY-MM-DD HH:mm:ss'));
+          } else {
+            onChange(dayjs(value).startOf(picker).format('YYYY-MM-DD'));
+          }
+        } else {
+          const selectedDateTime = new Date(value);
+          onChange(selectedDateTime);
+        }
       },
       [showTime, onChange],
     );
@@ -79,10 +132,9 @@ const MobileDateTimePicker = connect(
           return data;
       }
     }, []);
-
     return (
       <>
-        <div contentEditable="false" onClick={() => !disabled && setVisible(true)}>
+        <div onClick={() => !disabled && setVisible(true)}>
           <NBDatePicker
             onClick={() => setVisible(true)}
             value={value}
@@ -104,8 +156,8 @@ const MobileDateTimePicker = connect(
           }}
           precision={showTime && picker === 'date' ? getPrecision(timeFormat) : picker === 'date' ? 'day' : picker}
           renderLabel={labelRenderer}
-          min={rest.min || new Date(1000, 0, 1)}
-          max={rest.max || new Date(9999, 11, 31)}
+          min={minDate || rest.min || new Date(1950, 0, 1)}
+          max={maxDate || rest.max || new Date(2050, 11, 31)}
           onConfirm={(val) => {
             handleConfirm(val);
           }}
@@ -275,7 +327,7 @@ const MobileTimePicker: ComposedMobileTimePicker = connect(
     };
 
     return (
-      <div contentEditable="false" onClick={() => setVisible(true)}>
+      <div onClick={() => setVisible(true)}>
         <NBTimePicker {...props} style={{ pointerEvents: 'none' }} />
         <Picker onConfirm={handleTimeChange} columns={timeData} visible={visible} />
       </div>
@@ -285,5 +337,10 @@ const MobileTimePicker: ComposedMobileTimePicker = connect(
   mapReadPretty(NBTimePicker.ReadPretty),
 );
 
+MobileDateTimePicker.displayName = 'MobileDateTimePicker';
+MobileRangePicker.displayName = 'MobileRangePicker';
+MobileDateFilterWithPicker.displayName = 'MobileDateFilterWithPicker';
+MobileTimePicker.displayName = 'MobileTimePicker';
+
 MobileTimePicker.RangePicker = NBTimePicker.RangePicker;
-export { MobileDateTimePicker, MobileRangePicker, MobileDateFilterWithPicker, MobileTimePicker };
+export { MobileDateFilterWithPicker, MobileDateTimePicker, MobileRangePicker, MobileTimePicker };

@@ -114,7 +114,7 @@ exports.postCheck = async (opts) => {
   const port = opts.port || process.env.APP_PORT;
   const result = await exports.isPortReachable(port);
   if (result) {
-    console.error(chalk.red(`post already in use ${port}`));
+    console.error(chalk.red(`Port ${port} already in use`));
     process.exit(1);
   }
 };
@@ -165,10 +165,11 @@ exports.promptForTs = () => {
 };
 
 exports.downloadPro = async () => {
-  const { NOCOBASE_PKG_USERNAME, NOCOBASE_PKG_PASSWORD } = process.env;
-  if (!(NOCOBASE_PKG_USERNAME && NOCOBASE_PKG_PASSWORD)) {
-    return;
-  }
+  // 此处不再判定，由pkgg命令处理
+  // const { NOCOBASE_PKG_USERNAME, NOCOBASE_PKG_PASSWORD } = process.env;
+  // if (!(NOCOBASE_PKG_USERNAME && NOCOBASE_PKG_PASSWORD)) {
+  //   return;
+  // }
   await exports.run('yarn', ['nocobase', 'pkg', 'download-pro']);
 };
 
@@ -360,7 +361,7 @@ exports.initEnv = function initEnv() {
     API_BASE_PATH: '/api/',
     API_CLIENT_STORAGE_PREFIX: 'NOCOBASE_',
     API_CLIENT_STORAGE_TYPE: 'localStorage',
-    DB_DIALECT: 'sqlite',
+    // DB_DIALECT: 'sqlite',
     DB_STORAGE: 'storage/db/nocobase.sqlite',
     // DB_TIMEZONE: '+00:00',
     DB_UNDERSCORED: parseEnv('DB_UNDERSCORED'),
@@ -389,7 +390,7 @@ exports.initEnv = function initEnv() {
   if (
     !process.env.APP_ENV_PATH &&
     process.argv[2] &&
-    ['test', 'test:client', 'test:server'].includes(process.argv[2])
+    ['test', 'test:client', 'test:server', 'benchmark', 'perf'].includes(process.argv[2])
   ) {
     if (fs.existsSync(resolve(process.cwd(), '.env.test'))) {
       process.env.APP_ENV_PATH = '.env.test';
@@ -460,6 +461,22 @@ exports.initEnv = function initEnv() {
   process.env.SOCKET_PATH = generateGatewayPath();
   fs.mkdirpSync(dirname(process.env.SOCKET_PATH), { force: true, recursive: true });
   fs.mkdirpSync(process.env.PM2_HOME, { force: true, recursive: true });
+  const pkgs = [
+    '@nocobase/plugin-multi-app-manager',
+    '@nocobase/plugin-departments',
+    '@nocobase/plugin-field-attachment-url',
+    '@nocobase/plugin-workflow-response-message',
+  ];
+  for (const pkg of pkgs) {
+    const pkgDir = resolve(process.cwd(), 'storage/plugins', pkg);
+    fs.existsSync(pkgDir) && fs.rmdirSync(pkgDir, { recursive: true, force: true });
+  }
+};
+
+exports.checkDBDialect = function () {
+  if (!process.env.DB_DIALECT) {
+    throw new Error('DB_DIALECT is required.');
+  }
 };
 
 exports.generatePlugins = function () {

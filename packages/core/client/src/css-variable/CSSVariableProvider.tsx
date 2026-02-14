@@ -37,15 +37,24 @@ export const CSSVariableProvider = ({ children }) => {
     document.body.style.setProperty('--colorWarningBg', token.colorWarningBg);
     document.body.style.setProperty('--colorWarningBorder', token.colorWarningBorder);
     document.body.style.setProperty('--colorText', token.colorText);
+    document.body.style.setProperty('--colorTextHeaderMenu', token.colorTextHeaderMenu);
     document.body.style.setProperty('--colorPrimaryText', token.colorPrimaryText);
     document.body.style.setProperty('--colorPrimaryTextActive', token.colorPrimaryTextActive);
     document.body.style.setProperty('--colorPrimaryTextHover', token.colorPrimaryTextHover);
+    // 侧边菜单栏相关CSS变量
+    document.body.style.setProperty('--colorBgSider', token.colorBgSider);
+    document.body.style.setProperty('--colorBgSiderMenuHover', token.colorBgSiderMenuHover);
+    document.body.style.setProperty('--colorBgSiderMenuActive', token.colorBgSiderMenuActive);
+    document.body.style.setProperty('--colorTextSiderMenu', token.colorTextSiderMenu);
+    document.body.style.setProperty('--colorTextSiderMenuHover', token.colorTextSiderMenuHover);
+    document.body.style.setProperty('--colorTextSiderMenuActive', token.colorTextSiderMenuActive);
     document.body.style.setProperty('--colorBgScrollTrack', colorBgScrollTrack);
     document.body.style.setProperty('--colorBgScrollBar', colorBgScrollBar);
     document.body.style.setProperty('--colorBgScrollBarHover', colorBgScrollBarHover);
     document.body.style.setProperty('--colorBgScrollBarActive', colorBgScrollBarActive);
     document.body.style.setProperty('--colorSettings', token.colorSettings || defaultTheme.token.colorSettings);
     document.body.style.setProperty('--colorBgSettingsHover', token.colorBgSettingsHover);
+    document.body.style.setProperty('--colorTemplateBgSettingsHover', token.colorTemplateBgSettingsHover);
     document.body.style.setProperty('--colorBorderSettingsHover', token.colorBorderSettingsHover);
     document.body.style.setProperty('--colorBgMenuItemSelected', token.colorBgHeaderMenuActive);
 
@@ -59,6 +68,7 @@ export const CSSVariableProvider = ({ children }) => {
     token.colorBgContainer,
     token.colorBgLayout,
     token.colorBgSettingsHover,
+    token.colorTemplateBgSettingsHover,
     token.colorBorderSettingsHover,
     token.colorInfoBg,
     token.colorInfoBorder,
@@ -75,6 +85,14 @@ export const CSSVariableProvider = ({ children }) => {
     token.marginXS,
     token.paddingContentVerticalSM,
     token.sizeXXL,
+    token.colorTextHeaderMenu,
+    // 侧边菜单栏相关依赖
+    token.colorBgSider,
+    token.colorBgSiderMenuHover,
+    token.colorBgSiderMenuActive,
+    token.colorTextSiderMenu,
+    token.colorTextSiderMenuHover,
+    token.colorTextSiderMenuActive,
   ]);
 
   return children;

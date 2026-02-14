@@ -12,7 +12,7 @@ import { CollectionBlockInitializer } from '../components/CollectionBlockInitial
 import { FieldsSelect } from '../components/FieldsSelect';
 import { NAMESPACE, lang } from '../locale';
 import { appends, collection, filter } from '../schemas/collection';
-import { getCollectionFieldOptions, useGetCollectionFields } from '../variable';
+import { getCollectionFieldOptions, useGetDataSourceCollectionManager } from '../variable';
 import { useWorkflowAnyExecuted } from '../hooks';
 import { Trigger } from '.';
 import { TriggerCollectionRecordSelect } from '../components/TriggerCollectionRecordSelect';
@@ -34,7 +34,7 @@ const collectionModeOptions = [
 function useVariables(config, options) {
   const [dataSourceName, collection] = parseCollectionName(config.collection);
   const compile = useCompile();
-  const getCollectionFields = useGetCollectionFields(dataSourceName);
+  const collectionManager = useGetDataSourceCollectionManager(dataSourceName);
 
   const rootFields = [
     {
@@ -56,7 +56,7 @@ function useVariables(config, options) {
     ...options,
     fields: rootFields,
     compile,
-    getCollectionFields,
+    collectionManager,
   });
   return result;
 }
@@ -130,7 +130,7 @@ export default class extends Trigger {
     changed: {
       type: 'array',
       title: `{{t("Changed fields", { ns: "${NAMESPACE}" })}}`,
-      description: `{{t("Triggered only if one of the selected fields changes. If unselected, it means that it will be triggered when any field changes. When record is added or deleted, any field is considered to have been changed.", { ns: "${NAMESPACE}" })}}`,
+      description: `{{t("Triggered only if one of the selected fields changes. If unselected, it means that it will be triggered when any field changes. When record is added, any field is considered to have been changed.", { ns: "${NAMESPACE}" })}}`,
       'x-decorator': 'FormItem',
       'x-component': 'FieldsSelect',
       'x-component-props': {

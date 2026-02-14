@@ -9,11 +9,12 @@
 
 import { PageHeader } from '@ant-design/pro-layout';
 import { css } from '@emotion/css';
-import { Layout, Menu, Result } from 'antd';
+import { Layout, Menu } from 'antd';
 import _ from 'lodash';
 import React, { createContext, useCallback, useEffect, useMemo } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ADMIN_SETTINGS_PATH, PluginSettingsPageType, useApp } from '../application';
+import { AppNotFound } from '../common/AppNotFound';
 import { useDocumentTitle } from '../document-title';
 import { useCompile } from '../schema-component';
 import { useStyles } from './style';
@@ -161,7 +162,6 @@ export const AdminSettingsLayout = () => {
             height: 100%;
             left: 0;
             top: 0;
-            background: rgba(0, 0, 0, 0);
             z-index: 100;
             .ant-layout-sider-children {
               top: 46px;
@@ -170,7 +170,6 @@ export const AdminSettingsLayout = () => {
               height: calc(100vh - 46px);
             }
           `}
-          theme={'light'}
         >
           <Menu
             selectedKeys={[currentSetting?.pluginKey || currentSetting.topLevelName]}
@@ -223,13 +222,7 @@ export const AdminSettingsLayout = () => {
               }
             />
           )}
-          <div className={styles.pageContent}>
-            {currentSetting ? (
-              <Outlet />
-            ) : (
-              <Result status="404" title="404" subTitle="Sorry, the page you visited does not exist." />
-            )}
-          </div>
+          <div className={styles.pageContent}>{currentSetting ? <Outlet /> : <AppNotFound />}</div>
         </Layout.Content>
       </Layout>
     </div>

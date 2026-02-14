@@ -97,21 +97,21 @@ export const ChartFilterFormItem = observer(
     const collectionField = schema?.['x-collection-field'] || '';
     const [collection] = collectionField.split('.');
     return (
-      <BlockItem className={'nb-form-item'}>
-        <CollectionManagerProvider dataSource={dataSource}>
-          <CollectionProvider name={collection} allowNull={!collection}>
-            <CollectionFieldProvider name={schema.name} allowNull={!schema['x-collection-field']}>
-              <ACLCollectionFieldProvider>
-                <ErrorBoundary onError={console.log} FallbackComponent={ErrorFallback}>
-                  <IsInNocoBaseRecursionFieldContext.Provider value={false}>
+      <CollectionManagerProvider dataSource={dataSource}>
+        <CollectionProvider name={collection} allowNull={!collection}>
+          <CollectionFieldProvider name={schema.name} allowNull={!schema['x-collection-field']}>
+            <ACLCollectionFieldProvider>
+              <ErrorBoundary onError={console.log} FallbackComponent={ErrorFallback}>
+                <IsInNocoBaseRecursionFieldContext.Provider value={false}>
+                  <BlockItem className={'nb-form-item'}>
                     <FormItem className={className} {...props} extra={extra} />
-                  </IsInNocoBaseRecursionFieldContext.Provider>
-                </ErrorBoundary>
-              </ACLCollectionFieldProvider>
-            </CollectionFieldProvider>
-          </CollectionProvider>
-        </CollectionManagerProvider>
-      </BlockItem>
+                  </BlockItem>
+                </IsInNocoBaseRecursionFieldContext.Provider>
+              </ErrorBoundary>
+            </ACLCollectionFieldProvider>
+          </CollectionFieldProvider>
+        </CollectionProvider>
+      </CollectionManagerProvider>
     );
   },
   { displayName: 'ChartFilterFormItem' },
@@ -240,7 +240,8 @@ export const ChartFilterCustomItemInitializer: React.FC<{
         title: title,
         name: `custom.${name}`,
         required: false,
-        'x-designer': 'ChartFilterItemDesigner',
+        'x-toolbar': 'ChartFilterItemToolbar',
+        'x-settings': 'chart:filterForm:item',
         'x-decorator': 'ChartFilterFormItem',
         'x-component-props': {
           ...(defaultSchema['x-component-props'] || {}),

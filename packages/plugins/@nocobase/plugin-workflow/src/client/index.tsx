@@ -7,18 +7,18 @@
  * For more information, please refer to: https://www.nocobase.com/agreement.
  */
 
-import { PagePopups, Plugin, useCompile } from '@nocobase/client';
+import { PagePopups, Plugin, useCompile, lazy } from '@nocobase/client';
 import { Registry } from '@nocobase/utils/client';
+import MobileManager from '@nocobase/plugin-mobile/client';
 
 // import { ExecutionPage } from './ExecutionPage';
 // import { WorkflowPage } from './WorkflowPage';
 // import { WorkflowPane } from './WorkflowPane';
-import { lazy } from '@nocobase/client';
 const { ExecutionPage } = lazy(() => import('./ExecutionPage'), 'ExecutionPage');
 const { WorkflowPage } = lazy(() => import('./WorkflowPage'), 'WorkflowPage');
 const { WorkflowPane } = lazy(() => import('./WorkflowPane'), 'WorkflowPane');
 
-import { NAMESPACE } from './locale';
+import { lang, NAMESPACE } from './locale';
 import { Instruction } from './nodes';
 import CalculationInstruction from './nodes/calculation';
 import ConditionInstruction from './nodes/condition';
@@ -33,7 +33,20 @@ import CollectionTrigger from './triggers/collection';
 import ScheduleTrigger from './triggers/schedule';
 import { getWorkflowDetailPath, getWorkflowExecutionsPath } from './utils';
 import { VariableOption } from './variable';
-import { TasksProvider, TaskTypeOptions, WorkflowTasks } from './WorkflowTasks';
+import {
+  MobileTabBarWorkflowTasksItem,
+  TasksCountsProvider,
+  TasksProvider,
+  tasksSchemaInitializerItem,
+  TaskTypeOptions,
+  WorkflowTasks,
+  WorkflowTasksMobile,
+} from './WorkflowTasks';
+import { WorkflowCollectionsProvider } from './WorkflowCollectionsProvider';
+import { observer } from '@formily/react';
+import { Space, Tooltip } from 'antd';
+import React from 'react';
+import { QuestionCircleOutlined } from '@ant-design/icons';
 
 const workflowConfigSettings = {
   Component: BindWorkflowConfig,
@@ -105,10 +118,28 @@ export default class PluginWorkflowClient extends Plugin {
   }
 
   registerTaskType(key: string, option: TaskTypeOptions) {
-    this.taskTypes.register(key, option);
+    this.taskTypes.register(key, { ...option, key });
   }
 
   async load() {
+    this.app.addProvider(WorkflowCollectionsProvider);
+    this.app.addProvider(TasksProvider);
+
+    this.app.pluginSettingsManager.add(NAMESPACE, {
+      icon: 'PartitionOutlined',
+      title: `{{t("Workflow", { ns: "${NAMESPACE}" })}}`,
+      Component: WorkflowPane,
+      aclSnippet: 'pm.workflow.workflows',
+    });
+
+    this.app.schemaSettingsManager.addItem('actionSettings:submit', 'workflowConfig', workflowConfigSettings);
+    this.app.schemaSettingsManager.addItem('actionSettings:createSubmit', 'workflowConfig', workflowConfigSettings);
+    this.app.schemaSettingsManager.addItem('actionSettings:updateSubmit', 'workflowConfig', workflowConfigSettings);
+    this.app.schemaSettingsManager.addItem('actionSettings:saveRecord', 'workflowConfig', workflowConfigSettings);
+    this.app.schemaSettingsManager.addItem('actionSettings:updateRecord', 'workflowConfig', workflowConfigSettings);
+    this.app.schemaSettingsManager.addItem('actionSettings:delete', 'workflowConfig', workflowConfigSettings);
+    this.app.schemaSettingsManager.addItem('actionSettings:bulkEditSubmit', 'workflowConfig', workflowConfigSettings);
+
     this.router.add('admin.workflow.workflows.id', {
       path: getWorkflowDetailPath(':id'),
       Component: WorkflowPage,
@@ -120,31 +151,24 @@ export default class PluginWorkflowClient extends Plugin {
     });
 
     this.router.add('admin.workflow.tasks', {
-      path: '/admin/workflow/tasks/:taskType/:status?',
+      path: '/admin/workflow/tasks/:taskType?/:status?/:popupId?',
       Component: WorkflowTasks,
     });
 
-    this.router.add('admin.workflow.tasks.popup', {
-      path: '/admin/workflow/tasks/:taskType/:status/popups/*',
-      Component: PagePopups,
-    });
-
-    this.app.pluginSettingsManager.add(NAMESPACE, {
-      icon: 'PartitionOutlined',
-      title: `{{t("Workflow", { ns: "${NAMESPACE}" })}}`,
-      Component: WorkflowPane,
-      aclSnippet: 'pm.workflow.workflows',
-    });
-
-    this.app.use(TasksProvider);
-
-    this.app.schemaSettingsManager.addItem('actionSettings:submit', 'workflowConfig', workflowConfigSettings);
-    this.app.schemaSettingsManager.addItem('actionSettings:createSubmit', 'workflowConfig', workflowConfigSettings);
-    this.app.schemaSettingsManager.addItem('actionSettings:updateSubmit', 'workflowConfig', workflowConfigSettings);
-    this.app.schemaSettingsManager.addItem('actionSettings:saveRecord', 'workflowConfig', workflowConfigSettings);
-    this.app.schemaSettingsManager.addItem('actionSettings:updateRecord', 'workflowConfig', workflowConfigSettings);
-    this.app.schemaSettingsManager.addItem('actionSettings:delete', 'workflowConfig', workflowConfigSettings);
-    this.app.schemaSettingsManager.addItem('actionSettings:bulkEditSubmit', 'workflowConfig', workflowConfigSettings);
+    const mobileManager = this.pm.get(MobileManager);
+    this.app.schemaInitializerManager.addItem('mobile:tab-bar', 'workflow-tasks', tasksSchemaInitializerItem);
+    this.app.addComponents({ TasksCountsProvider, MobileTabBarWorkflowTasksItem });
+    if (mobileManager.mobileRouter) {
+      const MobileComponent = observer(WorkflowTasksMobile, { displayName: 'WorkflowTasksMobile' });
+      // mobileManager.mobileRouter.add('mobile.page.workflow.tasks', {
+      //   path: '/page/workflow-tasks',
+      //   Component: MobileComponent,
+      // });
+      mobileManager.mobileRouter.add('mobile.page.workflow.tasks.list', {
+        path: '/page/workflow-tasks/:taskType?/:status?/:popupId?',
+        Component: MobileComponent,
+      });
+    }
 
     this.registerInstructionGroup('control', { key: 'control', label: `{{t("Control", { ns: "${NAMESPACE}" })}}` });
     this.registerInstructionGroup('calculation', {
@@ -178,6 +202,34 @@ export default class PluginWorkflowClient extends Plugin {
       label: `{{t("System time", { ns: "${NAMESPACE}" })}}`,
       value: 'now',
     });
+    this.registerSystemVariable({
+      key: 'instanceId',
+      label: (
+        <>
+          <span style={{ marginRight: '0.5em' }}>{lang('Instance ID')}</span>
+          <Tooltip title={lang('The ID of current server instance')}>
+            <QuestionCircleOutlined />
+          </Tooltip>
+        </>
+      ),
+      value: 'instanceId',
+    });
+    this.registerSystemVariable({
+      key: 'genSnowflakeId',
+      label: (
+        <>
+          <span style={{ marginRight: '0.5em' }}>{lang('Generate snowflake ID')}</span>
+          <Tooltip
+            title={lang(
+              '53 bit (JavaScript safe) unique ID generated by Snowflake algorithm. Will always generate new one each time use this variable.',
+            )}
+          >
+            <QuestionCircleOutlined />
+          </Tooltip>
+        </>
+      ),
+      value: 'genSnowflakeId',
+    });
   }
 }
 
@@ -193,3 +245,4 @@ export { default as useStyles } from './style';
 export { Trigger, useTrigger } from './triggers';
 export * from './utils';
 export * from './variable';
+export { usePopupRecordContext, useTasksCountsContext } from './WorkflowTasks';

@@ -32,6 +32,8 @@
     "e2e": "nocobase e2e",
     "ts": "nocobase test:server",
     "tc": "nocobase test:client",
+    "benchmark": "nocobase benchmark",
+    "perf": "nocobase perf",
     "doc": "nocobase doc",
     "doc:cn": "nocobase doc --lang=zh-CN",
     "postinstall": "nocobase postinstall",
@@ -52,7 +54,10 @@
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "nwsapi": "2.2.7",
-    "antd": "5.12.8",
+    "antd": "5.24.2",
+    "@formily/antd-v5": "1.2.3",
+    "@rushstack/ts-command-line": "4.23.7",
+    "dayjs": "1.11.13",
     "@ant-design/icons": "^5.6.1"
   },
   "config": {
@@ -66,7 +71,7 @@
       "prettier --write"
     ],
     "*.ts?(x)": [
-      "eslint --fix"
+      "eslint --fix --cache --cache-location node_modules/.cache/eslint/"
     ]
   },
   "devDependencies": {
@@ -81,6 +86,7 @@
     "ghooks": "^2.0.4",
     "lint-staged": "^13.2.3",
     "patch-package": "^8.0.0",
+    "pm2": "^6.0.5",
     "pretty-format": "^24.0.0",
     "pretty-quick": "^3.1.0",
     "react": "^18.0.0",

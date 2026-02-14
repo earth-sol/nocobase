@@ -9,6 +9,7 @@
 
 import { createSystemLogger, getLoggerFilePath, SystemLogger } from '@nocobase/logger';
 import { Registry, Toposort, ToposortOptions, uid } from '@nocobase/utils';
+import { lockdownSes } from '@nocobase/utils';
 import { createStoragePluginsSymlink } from '@nocobase/utils/plugin-symlink';
 import { Command } from 'commander';
 import compression from 'compression';
@@ -81,11 +82,42 @@ export class Gateway extends EventEmitter {
   private port: number = process.env.APP_PORT ? parseInt(process.env.APP_PORT) : null;
   private host = '0.0.0.0';
   private socketPath = resolve(process.cwd(), 'storage', 'gateway.sock');
+  private terminating = false;
+
+  private onTerminate = async (signal?: NodeJS.Signals) => {
+    if (this.terminating) {
+      return;
+    }
+
+    this.terminating = true;
+
+    const supervisor = AppSupervisor.getInstance();
+    const apps = Object.values(supervisor.apps || {});
+
+    try {
+      for (const app of apps) {
+        try {
+          await app.destroy({ signal });
+        } catch (error) {
+          const logger = app?.log ?? console;
+          logger.error?.(error);
+        }
+      }
+
+      await supervisor.destroy();
+    } catch (error) {
+      console.error('Failed to shutdown applications gracefully', error);
+    } finally {
+      this.destroy();
+    }
+  };
 
   private constructor() {
     super();
     this.reset();
     this.socketPath = getSocketPath();
+    process.once('SIGTERM', this.onTerminate);
+    process.once('SIGINT', this.onTerminate);
   }
 
   public static getInstance(options: any = {}): Gateway {
@@ -106,6 +138,8 @@ export class Gateway extends EventEmitter {
   }
 
   destroy() {
+    process.off('SIGTERM', this.onTerminate);
+    process.off('SIGINT', this.onTerminate);
     this.reset();
     Gateway.instance = null;
   }
@@ -142,6 +176,11 @@ export class Gateway extends EventEmitter {
     if (this.ipcSocketServer) {
       this.ipcSocketServer.close();
       this.ipcSocketServer = null;
+    }
+
+    if (this.wsServer) {
+      this.wsServer.close();
+      this.wsServer = null;
     }
   }
 
@@ -188,7 +227,15 @@ export class Gateway extends EventEmitter {
   }
 
   responseErrorWithCode(code, res, options) {
+    const log = this.getLogger(options.appName, res);
     const error = applyErrorWithArgs(getErrorWithCode(code), options);
+    log.error(error.message, {
+      method: 'responseErrorWithCode',
+      code,
+      error,
+      statusCode: res.statusCode,
+      appName: options.appName,
+    });
     this.responseError(res, error);
   }
 
@@ -366,6 +413,16 @@ export class Gateway extends EventEmitter {
     // NOTE: to avoid listener number warning (default to 10)
     // See: https://nodejs.org/api/events.html#emittersetmaxlistenersn
     mainApp.setMaxListeners(50);
+
+    // Delay SES lockdown until the app has finished starting to avoid breaking late-loaded modules.
+    mainApp.once('afterStart', () => {
+      lockdownSes({
+        consoleTaming: 'unsafe',
+        errorTaming: 'unsafe',
+        overrideTaming: 'moderate',
+        stackFiltering: 'verbose',
+      });
+    });
 
     let runArgs: any = [process.argv, { throwError: true, from: 'node' }];
 

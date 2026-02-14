@@ -9,7 +9,7 @@
 
 import { Context, utils as actionUtils } from '@nocobase/actions';
 import { Cache } from '@nocobase/cache';
-import { Collection, RelationField, Transaction } from '@nocobase/database';
+import { Collection, Model, RelationField, Transaction } from '@nocobase/database';
 import { Plugin } from '@nocobase/server';
 import lodash from 'lodash';
 import { resolve } from 'path';
@@ -22,6 +22,9 @@ import { createWithACLMetaMiddleware } from './middlewares/with-acl-meta';
 import { RoleModel } from './model/RoleModel';
 import { RoleResourceActionModel } from './model/RoleResourceActionModel';
 import { RoleResourceModel } from './model/RoleResourceModel';
+import { setSystemRoleMode } from './actions/union-role';
+import { checkAssociationOperate } from './middlewares/check-association-operate';
+import { checkChangesWithAssociation } from './middlewares/check-change-with-association';
 
 export class PluginACLServer extends Plugin {
   get acl() {
@@ -127,6 +130,7 @@ export class PluginACLServer extends Plugin {
         'roles.dataSourcesCollections:*',
         'roles.dataSourceResources:*',
         'dataSourcesRolesResourcesScopes:*',
+        'dataSourcesRolesResourcesActions:*',
         'rolesResourcesScopes:*',
       ],
     });
@@ -162,6 +166,8 @@ export class PluginACLServer extends Plugin {
 
     this.app.resourcer.define(availableActionResource);
     this.app.resourcer.define(roleCollectionsResource);
+
+    this.app.resourcer.registerActionHandler('roles:setSystemRoleMode', setSystemRoleMode);
 
     this.app.resourcer.registerActionHandler('roles:check', checkAction);
 
@@ -338,10 +344,16 @@ export class PluginACLServer extends Plugin {
     this.app.db.on('rolesUsers.afterSave', async (model) => {
       const cache = this.app.cache as Cache;
       await cache.del(`roles:${model.get('userId')}`);
+      await cache.del(`roles:${model.get('userId')}:defaultRole`);
+    });
+    this.app.db.on('systemSettings.afterSave', async (model) => {
+      const cache = this.app.cache as Cache;
+      await cache.del(`app:systemSettings`);
     });
     this.app.db.on('rolesUsers.afterDestroy', async (model) => {
       const cache = this.app.cache as Cache;
       await cache.del(`roles:${model.get('userId')}`);
+      await cache.del(`roles:${model.get('userId')}:defaultRole`);
     });
 
     const writeRolesToACL = async (app, options) => {
@@ -366,6 +378,7 @@ export class PluginACLServer extends Plugin {
         return;
       }
       const User = this.db.getCollection('users');
+      const user = await User.repository.findOne();
       await User.repository.update({
         values: {
           roles: ['root', 'admin', 'member'],
@@ -376,7 +389,7 @@ export class PluginACLServer extends Plugin {
       const RolesUsers = this.db.getCollection('rolesUsers');
       await RolesUsers.repository.update({
         filter: {
-          userId: 1,
+          userId: user.id,
           roleName: 'root',
         },
         values: {
@@ -410,7 +423,7 @@ export class PluginACLServer extends Plugin {
             name: 'member',
             title: '{{t("Member")}}',
             allowNewMenu: true,
-            strategy: { actions: ['view', 'update:own', 'destroy:own', 'create'] },
+            strategy: { actions: ['view:own'] },
             default: true,
             snippets: ['!ui.*', '!pm', '!pm.*'],
           },
@@ -436,6 +449,17 @@ export class PluginACLServer extends Plugin {
       });
     });
 
+    this.app.on('afterStart', async (app) => {
+      app.db.on('rolesUsers.beforeSave', async (model: Model) => {
+        if (!model._changed.has('roleName')) {
+          return;
+        }
+        if (model.roleName === 'root') {
+          throw new Error('No permissions');
+        }
+      });
+    });
+
     this.app.on('cache:del:roles', ({ userId }) => {
       this.app.cache.del(`roles:${userId}`);
     });
@@ -445,7 +469,7 @@ export class PluginACLServer extends Plugin {
     this.app.acl.allow('roles', 'check', 'loggedIn');
 
     this.app.acl.allow('*', '*', (ctx) => {
-      return ctx.state.currentRole === 'root';
+      return ctx.state.currentRoles?.includes('root');
     });
 
     this.app.acl.addFixedParams('collections', 'destroy', () => {
@@ -519,8 +543,9 @@ export class PluginACLServer extends Plugin {
           collection = ctx.db.getCollection(resourceName);
         }
 
-        if (collection && collection.hasField('createdById')) {
-          ctx.permission.can.params.fields.push('createdById');
+        const fields = ctx.permission.can.params.fields;
+        if (collection && collection.hasField('createdById') && !fields.includes('createdById')) {
+          fields.push('createdById');
         }
       }
       return next();
@@ -615,6 +640,18 @@ export class PluginACLServer extends Plugin {
       },
       { after: 'dataSource', group: 'with-acl-meta' },
     );
+
+    this.app.dataSourceManager.afterAddDataSource((dataSource) => {
+      dataSource.acl.use(checkAssociationOperate, {
+        before: 'core',
+      });
+      if (dataSource.options.acl !== false && dataSource.options.useACL !== false) {
+        dataSource.resourceManager.registerPreActionHandler('create', checkChangesWithAssociation);
+        dataSource.resourceManager.registerPreActionHandler('firstOrCreate', checkChangesWithAssociation);
+        dataSource.resourceManager.registerPreActionHandler('updateOrCreate', checkChangesWithAssociation);
+        dataSource.resourceManager.registerPreActionHandler('update', checkChangesWithAssociation);
+      }
+    });
 
     this.db.on('afterUpdateCollection', async (collection) => {
       if (collection.options.loadedFromCollectionManager || collection.options.asStrategyResource) {

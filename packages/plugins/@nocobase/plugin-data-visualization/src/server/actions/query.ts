@@ -14,6 +14,8 @@ import { Cache } from '@nocobase/cache';
 import { middlewares } from '@nocobase/server';
 import { QueryParams } from '../types';
 import { createQueryParser } from '../query-parser';
+import { assign } from '@nocobase/utils';
+import { NoPermissionError } from '@nocobase/acl';
 
 const getDB = (ctx: Context, dataSource: string) => {
   const ds = ctx.app.dataSourceManager.dataSources.get(dataSource);
@@ -154,11 +156,17 @@ export const parseFieldAndAssociations = async (ctx: Context, next: Next) => {
     const stack = [...filterInclude];
     while (stack.length) {
       const item = stack.pop();
-      if (fields.get(item.association)?.type === 'belongsToMany') {
+
+      const parentCollection = db.getCollection(item.parentCollection || collectionName);
+      const field = parentCollection.fields.get(item.association);
+      if (field?.type === 'belongsToMany') {
         item.through = { attributes: [] };
       }
-      if (item.include) {
-        stack.push(...item.include);
+      if (field?.target && item.include?.length) {
+        for (const child of item.include) {
+          child.parentCollection = field.target;
+          stack.push(child);
+        }
       }
     }
   }
@@ -200,13 +208,29 @@ export const cacheMiddleware = async (ctx: Context, next: Next) => {
   }
 };
 
-export const checkPermission = (ctx: Context, next: Next) => {
+export const checkPermission = async (ctx: Context, next: Next) => {
   const { collection, dataSource } = ctx.action.params.values as QueryParams;
-  const roleName = ctx.state.currentRole || 'anonymous';
+  const roleNames = ctx.state.currentRoles || ['anonymous'];
   const acl = ctx.app.dataSourceManager.get(dataSource)?.acl || ctx.app.acl;
-  const can = acl.can({ role: roleName, resource: collection, action: 'list' });
-  if (!can && roleName !== 'root') {
+  const can = acl.can({ roles: roleNames, resource: collection, action: 'list' });
+  if (!can && !roleNames.includes('root')) {
     ctx.throw(403, 'No permissions');
+  }
+  if (can?.params?.filter) {
+    try {
+      acl.filterParams(ctx, collection, can.params);
+    } catch (e) {
+      if (e instanceof NoPermissionError) {
+        ctx.throw(403, 'No permissions');
+      }
+    }
+    const filter = ctx.action.params.values.filter || {};
+    ctx.action.params.values = {
+      ...ctx.action.params.values,
+      filter: assign(filter, can?.params.filter, {
+        filter: 'andMerge',
+      }),
+    };
   }
   return next();
 };

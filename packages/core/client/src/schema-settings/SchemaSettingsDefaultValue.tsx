@@ -37,7 +37,7 @@ import {
 import { VariableInput, getShouldChange } from './VariableInput/VariableInput';
 import { Option } from './VariableInput/type';
 import { formatVariableScop } from './VariableInput/utils/formatVariableScop';
-
+import { SchemaComponentContext } from '../schema-component';
 const getActionContext = (context: { fieldSchema?: Schema }) => {
   const actionCtx = (context.fieldSchema?.['x-action-context'] || {}) as { collection?: string; dataSource?: string };
   return actionCtx;
@@ -64,7 +64,7 @@ export const SchemaSettingsDefaultValue = function DefaultValueConfigure(props: 
   const localVariables = useLocalVariables();
   const collection = useCollection_deprecated();
   const record = useRecord();
-  const { form } = useFormBlockContext();
+  const { form, type } = useFormBlockContext();
   const { getFields } = useCollectionFilterOptionsV2(collection);
   const { isInSubForm, isInSubTable } = useFlag() || {};
 
@@ -110,11 +110,13 @@ export const SchemaSettingsDefaultValue = function DefaultValueConfigure(props: 
       FormLayout,
       VariableInput: (inputProps) => {
         return (
-          <VariableInput
-            {...inputProps}
-            value={inputProps.value || undefined}
-            hideVariableButton={props?.hideVariableButton}
-          />
+          <SchemaComponentContext.Provider value={{ designable: false }}>
+            <VariableInput
+              {...inputProps}
+              value={inputProps.value || undefined}
+              hideVariableButton={props?.hideVariableButton}
+            />
+          </SchemaComponentContext.Provider>
         );
       },
     };
@@ -145,7 +147,10 @@ export const SchemaSettingsDefaultValue = function DefaultValueConfigure(props: 
               getAllCollectionsInheritChain,
             }),
             renderSchemaComponent: function Com(props) {
-              const clonedSchema = useMemo(() => _.cloneDeep(fieldSchemaWithoutRequired) || ({} as Schema), []);
+              const clonedSchema = useMemo(
+                () => _.cloneDeep(fieldSchemaWithoutRequired.toJSON()) || ({} as Schema),
+                [],
+              );
               clonedSchema['x-read-pretty'] = false;
               clonedSchema['x-disabled'] = false;
               _.set(clonedSchema, 'x-decorator-props.showTitle', false);
@@ -219,7 +224,6 @@ export const SchemaSettingsDefaultValue = function DefaultValueConfigure(props: 
     targetField,
     variables,
   ]);
-
   const handleSubmit: (values: any) => void = useCallback(
     (v) => {
       const schema: ISchema = {
@@ -227,7 +231,7 @@ export const SchemaSettingsDefaultValue = function DefaultValueConfigure(props: 
       };
       fieldSchema.default = v.default ?? null;
       if (!isVariable(v.default)) {
-        field.setInitialValue?.(v.default);
+        (record.__isNewRecord__ || type === 'create') && field.setInitialValue?.(v.default);
       }
       schema.default = v.default ?? null;
       dn.emit('patch', {
@@ -245,9 +249,14 @@ export const SchemaSettingsDefaultValue = function DefaultValueConfigure(props: 
       width={800}
       schema={schema}
       onSubmit={handleSubmit}
-      ModalContextProvider={(props) => {
+      ModalContextProvider={(props: any) => {
         return (
-          <FlagProvider isInSubForm={isInSubForm} isInSubTable={isInSubTable} isInSetDefaultValueDialog>
+          <FlagProvider
+            isInSubForm={isInSubForm}
+            isInSubTable={isInSubTable}
+            isInSetDefaultValueDialog
+            collectionField={collectionField}
+          >
             {props.children}
           </FlagProvider>
         );

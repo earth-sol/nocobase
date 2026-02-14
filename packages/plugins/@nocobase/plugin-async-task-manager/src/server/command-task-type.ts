@@ -1,3 +1,12 @@
+/**
+ * This file is part of the NocoBase (R) project.
+ * Copyright (c) 2020-2024 NocoBase Co., Ltd.
+ * Authors: NocoBase Team.
+ *
+ * This project is dual-licensed under AGPL-3.0 and NocoBase Commercial License.
+ * For more information, please refer to: https://www.nocobase.com/agreement.
+ */
+
 import { CancelError } from './interfaces/async-task-manager';
 import process from 'node:process';
 import { Worker } from 'worker_threads';
@@ -9,16 +18,36 @@ export class CommandTaskType extends TaskType {
 
   workerThread: Worker;
 
+  static defaults(data) {
+    data.argv?.push(`--taskId=${data.id}`);
+    return data;
+  }
+
   async execute() {
-    const { argv } = this.options;
+    const { argv } = this.record.params;
     const isDev = (process.argv[1]?.endsWith('.ts') || process.argv[1].includes('tinypool')) ?? false;
     const appRoot = process.env.APP_PACKAGE_ROOT || 'packages/core/app';
     const workerPath = path.resolve(process.cwd(), appRoot, isDev ? 'src/index.ts' : 'lib/index.js');
 
     const workerPromise = new Promise((resolve, reject) => {
+      let settled = false;
+      let successPayload: any;
+
+      const settleOnce = (err?: Error | null, payload?: any) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(payload);
+      };
+
       try {
         this.logger?.info(
-          `Creating worker for task ${this.taskId} - path: ${workerPath}, argv: ${JSON.stringify(
+          `Creating worker for task ${this.record.id} - path: ${workerPath}, argv: ${JSON.stringify(
             argv,
           )}, isDev: ${isDev}`,
         );
@@ -28,55 +57,62 @@ export class CommandTaskType extends TaskType {
           workerData: {
             argv,
           },
+          env: {
+            ...process.env,
+            WORKER_MODE: '-',
+          },
         });
 
         this.workerThread = worker;
-        this.logger?.debug(`Worker created successfully for task ${this.taskId}`);
+        this.logger?.debug(`Worker created successfully for task ${this.record.id}`);
 
         let isCancelling = false;
 
         // Listen for abort signal
         this.abortController.signal.addEventListener('abort', () => {
           isCancelling = true;
-          this.logger?.info(`Terminating worker for task ${this.taskId} due to cancellation`);
+          this.logger?.info(`Terminating worker for task ${this.record.id} due to cancellation`);
           worker.terminate();
         });
 
         worker.on('message', (message) => {
-          this.logger?.debug(`Worker message received for task ${this.taskId} - type: ${message.type}`);
+          this.logger?.trace(`Worker message received for task ${this.record.id} - type: ${message.type}`);
           if (message.type === 'progress') {
             this.reportProgress(message.payload);
           }
 
           if (message.type === 'success') {
             this.logger?.info(
-              `Worker completed successfully for task ${this.taskId} with payload: ${JSON.stringify(message.payload)}`,
+              `Worker completed successfully for task ${this.record.id} with payload: ${JSON.stringify(
+                message.payload,
+              )}`,
             );
-            resolve(message.payload);
+            // Wait for worker exit to ensure app shutdown and DB commits are finished.
+            successPayload = message.payload;
           }
         });
 
         worker.on('error', (error) => {
-          this.logger?.error(`Worker error for task ${this.taskId}`, error);
-          reject(error);
+          this.logger?.error(`Worker error for task ${this.record.id}`, error);
+          settleOnce(error);
         });
 
         worker.on('exit', (code) => {
-          this.logger?.info(`Worker exited for task ${this.taskId} with code ${code}`);
+          this.logger?.info(`Worker exited for task ${this.record.id} with code ${code}`);
           if (isCancelling) {
-            reject(new CancelError());
+            settleOnce(new CancelError());
           } else if (code !== 0) {
-            reject(new Error(`Worker stopped with exit code ${code}`));
+            settleOnce(new Error(`Worker stopped with exit code ${code}`));
           } else {
-            resolve(code);
+            settleOnce(null, successPayload ?? code);
           }
         });
 
         worker.on('messageerror', (error) => {
-          reject(error);
+          settleOnce(error);
         });
       } catch (error) {
-        reject(error);
+        settleOnce(error as Error);
       }
     });
 

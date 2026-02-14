@@ -7,7 +7,7 @@
  * For more information, please refer to: https://www.nocobase.com/agreement.
  */
 
-import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse, RawAxiosRequestHeaders } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, RawAxiosRequestHeaders } from 'axios';
 import qs from 'qs';
 
 export interface ActionParams {
@@ -240,6 +240,45 @@ export class Auth {
     this.setToken(null);
     this.setRole(null);
     this.setAuthenticator(null);
+    return response;
+  }
+
+  async lostPassword(values: any): Promise<AxiosResponse<any>> {
+    // 获取当前 URL 的查询参数
+    const searchParams = new URLSearchParams(window.location.search);
+
+    // 转换为对象
+    const paramsObject = Object.fromEntries(searchParams.entries());
+
+    const response = await this.api.request({
+      method: 'post',
+      url: 'auth:lostPassword',
+      data: {
+        ...values,
+        baseURL: window.location.href.split('/forgot-password')[0],
+      },
+      headers: {
+        'X-Authenticator': paramsObject.name,
+      },
+    });
+    return response;
+  }
+
+  async resetPassword(values: any): Promise<AxiosResponse<any>> {
+    const response = await this.api.request({
+      method: 'post',
+      url: 'auth:resetPassword',
+      data: values,
+    });
+    return response;
+  }
+
+  async checkResetToken(values: any): Promise<AxiosResponse<any>> {
+    const response = await this.api.request({
+      method: 'post',
+      url: 'auth:checkResetToken',
+      data: values,
+    });
     return response;
   }
 }

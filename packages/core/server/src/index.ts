@@ -18,6 +18,9 @@ export * from './migration';
 export * from './plugin';
 export * from './plugin-manager';
 export * from './pub-sub-manager';
+export * from './event-queue';
+export * from './worker-id-allocator';
+export * from './redis-connection-manager';
 export const OFFICIAL_PLUGIN_PREFIX = '@nocobase/plugin-';
 
 export {
@@ -29,3 +32,4 @@ export {
 } from './plugin-manager/findPackageNames';
 
 export { runPluginStaticImports } from './run-plugin-static-imports';
+export { createContextVariablesScope } from './helper';

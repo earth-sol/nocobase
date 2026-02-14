@@ -24,6 +24,7 @@ import {
   useCollectionRecordData,
   useDataBlockRequestData,
   useDataBlockRequestGetter,
+  useDeleteRouteSchema,
   useInsertPageSchema,
   useMenuTranslation,
   useNocoBaseRoutes,
@@ -398,8 +399,9 @@ export const createRoutesTableSchema = (collectionName: string, basename: string
                                   await form.submit();
                                   field.data = field.data || {};
                                   field.data.loading = true;
-                                  const { pageSchemaUid, tabSchemaUid, menuSchemaUid, tabSchemaName } =
-                                    await createRouteSchema(form.values);
+                                  const { pageSchemaUid, tabSchemaUid, tabSchemaName } = await createRouteSchema(
+                                    form.values,
+                                  );
                                   let options;
 
                                   if (form.values.href || !_.isEmpty(form.values.params)) {
@@ -427,10 +429,7 @@ export const createRoutesTableSchema = (collectionName: string, basename: string
                                   const res = await createRoute({
                                     ..._.omit(form.values, ['href', 'params', 'url']),
                                     schemaUid:
-                                      NocoBaseDesktopRouteType.page === form.values.type
-                                        ? pageSchemaUid
-                                        : menuSchemaUid,
-                                    menuSchemaUid,
+                                      NocoBaseDesktopRouteType.page === form.values.type ? pageSchemaUid : undefined,
                                     options,
                                     ...childrenObj,
                                   });
@@ -578,9 +577,7 @@ export const createRoutesTableSchema = (collectionName: string, basename: string
                   }
 
                   if (recordData.type === NocoBaseDesktopRouteType.page) {
-                    const path = `${basenameOfCurrentRouter.slice(0, -1)}${basename}/${
-                      isMobile ? recordData.schemaUid : recordData.menuSchemaUid
-                    }`;
+                    const path = `${basenameOfCurrentRouter.slice(0, -1)}${basename}/${recordData.schemaUid}`;
                     // 在点击 Access 按钮时，会用到
                     recordData._path = path;
 
@@ -596,7 +593,7 @@ export const createRoutesTableSchema = (collectionName: string, basename: string
                       recordData.parentId,
                       data.data,
                       isMobile,
-                    )}/tabs/${recordData.tabSchemaName || recordData.schemaUid}`;
+                    )}/tabs/${recordData.schemaUid}`;
                     recordData._path = path;
 
                     return (
@@ -877,8 +874,9 @@ export const createRoutesTableSchema = (collectionName: string, basename: string
                                         });
                                       } else {
                                         let options;
-                                        const { pageSchemaUid, tabSchemaUid, menuSchemaUid, tabSchemaName } =
-                                          await createRouteSchema(form.values);
+                                        const { pageSchemaUid, tabSchemaUid, tabSchemaName } = await createRouteSchema(
+                                          form.values,
+                                        );
 
                                         if (form.values.href || !_.isEmpty(form.values.params)) {
                                           options = {
@@ -893,8 +891,7 @@ export const createRoutesTableSchema = (collectionName: string, basename: string
                                           schemaUid:
                                             NocoBaseDesktopRouteType.page === form.values.type
                                               ? pageSchemaUid
-                                              : menuSchemaUid,
-                                          menuSchemaUid,
+                                              : undefined,
                                           options,
                                         });
 
@@ -1253,7 +1250,6 @@ function useCreateRouteSchema(isMobile: boolean) {
 
   const createRouteSchema = useCallback(
     async ({ type }: { type: NocoBaseDesktopRouteType }) => {
-      const menuSchemaUid = isMobile ? undefined : uid();
       const pageSchemaUid = uid();
       const tabSchemaName = uid();
       const tabSchemaUid = type === NocoBaseDesktopRouteType.page ? uid() : undefined;
@@ -1284,7 +1280,7 @@ function useCreateRouteSchema(isMobile: boolean) {
         await insertPageSchema(typeToSchema[type]);
       }
 
-      return { menuSchemaUid, pageSchemaUid, tabSchemaUid, tabSchemaName };
+      return { pageSchemaUid, tabSchemaUid, tabSchemaName };
     },
     [isMobile, resource, insertPageSchema],
   );
@@ -1312,23 +1308,6 @@ function useCreateRouteSchema(isMobile: boolean) {
   );
 
   return { createRouteSchema, createTabRouteSchema };
-}
-
-function useDeleteRouteSchema(collectionName = 'uiSchemas') {
-  const api = useAPIClient();
-  const resource = useMemo(() => api.resource(collectionName), [api, collectionName]);
-  const { refresh: refreshMenu } = useAllAccessDesktopRoutes();
-
-  const deleteRouteSchema = useCallback(
-    async (schemaUid: string) => {
-      const res = await resource[`remove/${schemaUid}`]();
-      refreshMenu();
-      return res;
-    },
-    [resource, refreshMenu],
-  );
-
-  return { deleteRouteSchema };
 }
 
 function TypeTag(props) {

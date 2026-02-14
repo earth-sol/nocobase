@@ -43,7 +43,8 @@ RUN cd /app \
   && yarn config set network-timeout 600000 -g \
   && yarn create nocobase-app my-nocobase-app -a -e APP_ENV=production -e APPEND_PRESET_LOCAL_PLUGINS=$APPEND_PRESET_LOCAL_PLUGINS \
   && cd /app/my-nocobase-app \
-  && yarn install --production
+  && yarn install --production \
+  && yarn add newrelic --production -W
 
 WORKDIR /app/my-nocobase-app
 RUN $BEFORE_PACK_NOCOBASE
@@ -56,11 +57,11 @@ RUN cd /app \
 
 FROM node:20-bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg \
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-RUN sh -c 'echo "deb http://mirrors.aliyun.com/postgresql/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-RUN wget --quiet -O - http://mirrors.aliyun.com/postgresql/repos/apt/ACCC4CF8.asc | apt-key add -
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg.asc] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+RUN wget --quiet -O /usr/share/keyrings/pgdg.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   nginx \
